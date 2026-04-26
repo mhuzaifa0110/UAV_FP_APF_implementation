@@ -1,0 +1,593 @@
+Rewritten Paper Notes
+Title: UAV 3D Path Planning Based on Integrated Particle Swarm Optimization and Artificial Potential Field Method
+
+1. Purpose of the Paper
+
+This paper studies how to generate a safe, efficient, and executable flight path for an unmanned aerial vehicle (UAV) in a three-dimensional environment. The main problem is that a UAV must travel from a start point to a goal while avoiding obstacles, staying reasonably smooth, and remaining easy for a real controller to track.
+
+The paper argues that:
+
+- Traditional Artificial Potential Field (APF) is fast and simple, but it can get trapped.
+- Particle Swarm Optimization (PSO) is better at search, but it can be unstable or computationally wasteful if used alone.
+- A hybrid method can combine the strengths of both.
+
+The proposed method is called FP-APF:
+
+- F = Fusion
+- P = Particle Swarm Optimization
+- APF = Artificial Potential Field
+
+
+2. Core Idea in Simple Words
+
+The method works in two stages at each planning step:
+
+- APF gives a direction toward the goal and away from obstacles.
+- PSO performs a local search around that APF-guided direction to improve the next path point.
+
+This means:
+
+- APF provides fast motion guidance.
+- PSO corrects poor local decisions and helps the UAV escape local traps.
+
+
+3. Background: Artificial Potential Field (APF)
+
+In APF, the environment is treated like a virtual force field:
+
+- The goal attracts the UAV.
+- Obstacles repel the UAV.
+
+The UAV moves according to the total virtual force.
+
+3.1 Total Potential Energy
+
+Python-style equation:
+
+U_q = U_att_q + U_rep_q
+
+Meaning:
+
+- U_q is the total potential at the UAV position q.
+- U_att_q is the attractive potential from the goal.
+- U_rep_q is the repulsive potential from obstacles.
+
+Significance:
+
+- This equation is the foundation of APF.
+- The UAV chooses motion based on how this potential changes in space.
+
+
+3.2 Attractive Potential
+
+Python-style equation:
+
+U_att_q = 0.5 * k_att * norm(q - q_goal)**2
+
+Meaning:
+
+- q is the current UAV position.
+- q_goal is the goal position.
+- k_att is the attraction coefficient.
+- norm(q - q_goal) is the distance from the UAV to the goal.
+
+Significance:
+
+- The farther the UAV is from the target, the stronger the attractive pull.
+- The quadratic form produces smooth guidance toward the goal.
+
+
+3.3 Attractive Force
+
+In APF, force is the negative gradient of potential. The paper writes the attractive force in equivalent directional form.
+
+Python-style equation:
+
+F_att_q = k_att * (q_goal - q)
+
+Meaning:
+
+- The force points from the current position toward the goal.
+- Its size depends on distance and the attraction coefficient.
+
+Significance:
+
+- This term gives the UAV a direct tendency to move toward its destination.
+
+
+3.4 Classical Repulsive Potential
+
+Python-style equation:
+
+if rho_q <= rho_0:
+    U_rep_q = 0.5 * k_rep * ((1.0 / rho_q) - (1.0 / rho_0))**2
+else:
+    U_rep_q = 0.0
+
+Meaning:
+
+- rho_q is the distance from the UAV to the nearest obstacle.
+- rho_0 is the obstacle influence radius.
+- k_rep is the repulsion coefficient.
+
+Significance:
+
+- Obstacles only affect the UAV within a limited range.
+- As the UAV gets closer to an obstacle, repulsion increases quickly.
+
+Weakness:
+
+- This model changes too abruptly near the obstacle boundary.
+- That sharp change can cause oscillation, jitter, or unstable motion.
+
+
+3.5 Resultant Force
+
+Python-style equation:
+
+F_total = F_att + sum(F_rep_i for i in obstacles)
+
+Meaning:
+
+- The total force is the sum of attraction and all obstacle repulsions.
+
+Significance:
+
+- This is the direction the UAV follows in standard APF.
+
+
+4. Problems in Traditional APF
+
+The paper emphasizes two major APF failures.
+
+4.1 Local Minimum Problem
+
+A local minimum occurs when:
+
+Python-style condition:
+
+grad_U_q = 0
+U_q != U_goal
+
+Meaning:
+
+- The total force becomes zero at some point that is not the target.
+- The UAV can stop moving or hover there.
+
+Why it matters:
+
+- The path planner fails even though a valid path may exist.
+
+
+4.2 Unreachable Target Problem
+
+If obstacles are very close to the goal:
+
+- attractive force becomes weak near the goal
+- repulsive force may become dominant
+
+Then the UAV cannot reach the target even when it is very close.
+
+Why it matters:
+
+- The planner appears to work, but the final goal cannot be achieved.
+
+
+5. Improved APF with Gaussian Repulsion
+
+To reduce the discontinuity of classical repulsion, the paper replaces the old repulsive force with a Gaussian-shaped repulsive model.
+
+The exact PDF extraction is noisy, but the intended equation from the paper can be represented in Python-style as:
+
+F_rep_q = K_rep * exp(-(rho_q**2) / (2 * sigma**2)) * ((1.0 / rho_q) - (1.0 / rho_d)) * n_d
+
+Where:
+
+- K_rep is the repulsive gain.
+- rho_q is the current obstacle distance.
+- sigma is the Gaussian width parameter.
+- rho_d is the effective obstacle influence distance.
+- n_d is the unit vector from obstacle to UAV.
+
+Meaning:
+
+- The Gaussian term makes repulsion decay smoothly with distance.
+- The direction still pushes the UAV away from the obstacle.
+
+Significance:
+
+- Smoother obstacle avoidance.
+- Less oscillation near obstacle boundaries.
+- Less unnecessary influence from far obstacles.
+- Better path continuity in dense 3D scenes.
+
+
+6. Particle Swarm Optimization (PSO)
+
+PSO is a population-based optimization method. Each particle is a candidate next waypoint.
+
+Each particle stores:
+
+- current position
+- current velocity
+- personal best position
+- access to the swarm global best
+
+6.1 Particle Velocity Update
+
+Python-style equation:
+
+v_i_next = (
+    w * v_i
+    + c1 * r1 * (p_best_i - x_i)
+    + c2 * r2 * (g_best - x_i)
+)
+
+Meaning:
+
+- v_i is the current particle velocity.
+- x_i is the current particle position.
+- p_best_i is the best position particle i has found.
+- g_best is the best position found by the swarm.
+- w is inertia weight.
+- c1 and c2 are acceleration constants.
+- r1 and r2 are random numbers in [0, 1].
+
+Significance:
+
+- The inertia term preserves motion tendency.
+- The cognitive term makes each particle trust its own experience.
+- The social term makes the swarm follow the best known solution.
+
+
+6.2 Particle Position Update
+
+Python-style equation:
+
+x_i_next = x_i + v_i_next
+
+Meaning:
+
+- The new particle position is the old position plus the updated velocity.
+
+Significance:
+
+- This creates iterative search behavior in continuous space.
+
+
+7. Fusion of APF and PSO
+
+This is the central contribution of the paper.
+
+7.1 Step 1: APF Guidance Point
+
+First, the total APF force is computed:
+
+F_total = F_att + F_rep
+
+Then the APF guidance point is generated:
+
+x_apf = x_t + F_total
+
+Meaning:
+
+- x_t is the UAV position at time step t.
+- x_apf is the APF-suggested next region.
+
+Significance:
+
+- APF provides the rough next direction quickly.
+
+
+7.2 Step 2: Initialize PSO Around the APF Point
+
+Python-style equation:
+
+x_i = x_apf + epsilon_i
+
+epsilon_i ~ Normal(0, sigma**2 * I)
+
+Meaning:
+
+- Each particle starts near the APF guidance point.
+- I is the identity matrix.
+- sigma controls the spread of the local search.
+
+Significance:
+
+- PSO is not searching the whole environment blindly.
+- It performs a focused local refinement around the APF suggestion.
+- This reduces computational cost compared with global PSO.
+
+
+7.3 Step 3: Fitness Function
+
+The extracted text shows the fitness in the form:
+
+f_x_i = norm(x_i - x_goal) + sum(P_k(x_i) for k in obstacles)
+
+Meaning:
+
+- The first term rewards closeness to the target.
+- The penalty term P_k(x_i) punishes positions too close to obstacles.
+
+Significance:
+
+- The particle is considered good if it is both goal-directed and safe.
+- This is how local search balances efficiency and obstacle avoidance.
+
+
+7.4 Step 4: Update Personal Best and Global Best
+
+Python-style logic:
+
+if f(x_i) < f(p_best_i):
+    p_best_i = x_i
+
+g_best = argmin(p_best_i over all particles)
+
+Meaning:
+
+- Each particle remembers its best candidate.
+- The swarm tracks the best candidate found overall.
+
+Significance:
+
+- This enables cooperative search and makes PSO robust against poor single-particle moves.
+
+
+7.5 Step 5: Final Linear Fusion
+
+The paper gives the next UAV point as a linear fusion of APF guidance and PSO result.
+
+Python-style equation:
+
+x_t_next = alpha * x_apf + (1 - alpha) * g_best
+
+Meaning:
+
+- alpha is a fusion coefficient.
+- x_apf is the deterministic APF direction.
+- g_best is the locally optimized PSO solution.
+
+Significance:
+
+- If alpha is larger, the planner trusts APF more.
+- If alpha is smaller, the planner trusts PSO more.
+- This allows a balance between speed and optimization quality.
+
+
+8. FP-APF Algorithm in Python-Like Pseudocode
+
+def fp_apf(start, goal, T_max, threshold):
+    x_t = start
+    t = 0
+
+    while norm(x_t - goal) > threshold and t < T_max:
+        F_att = attractive_force(x_t, goal)
+        F_rep = gaussian_repulsive_force(x_t, obstacles)
+        F_total = F_att + F_rep
+
+        x_apf = x_t + F_total
+
+        particles = initialize_particles_around(x_apf)
+        p_best = particles.copy()
+        g_best = best_particle(particles)
+
+        for _ in range(K):
+            for i in range(len(particles)):
+                v[i] = update_velocity(v[i], particles[i], p_best[i], g_best)
+                particles[i] = particles[i] + v[i]
+
+                if fitness(particles[i], goal, obstacles) < fitness(p_best[i], goal, obstacles):
+                    p_best[i] = particles[i]
+
+                if fitness(p_best[i], goal, obstacles) < fitness(g_best, goal, obstacles):
+                    g_best = p_best[i]
+
+        x_t = alpha * x_apf + (1 - alpha) * g_best
+        t += 1
+
+    return x_t
+
+Meaning:
+
+- The planner repeatedly uses APF for fast guidance.
+- It then refines each step locally using PSO.
+- The UAV advances until it reaches the goal or hits the iteration limit.
+
+
+9. Path Evaluation Metrics
+
+The paper does not rely only on visual inspection. It defines a weighted score using three metrics.
+
+9.1 Weighted Score
+
+Python-style equation:
+
+score = (
+    t1 * (1 - L / L_max)
+    + t2 * (D_avg / D_avg_max)
+    + t3 * (D_min / D_min_max)
+)
+
+Constraint:
+
+t1 + t2 + t3 = 1
+
+Meaning:
+
+- L = total path length
+- D_avg = average safety distance from obstacles
+- D_min = minimum safety distance from obstacles
+- t1, t2, t3 = metric weights
+
+Significance:
+
+- Shorter paths should score better.
+- Larger average clearance should score better.
+- Larger minimum clearance should score better.
+
+This matters because:
+
+- path length measures efficiency
+- average clearance measures overall safety
+- minimum clearance measures worst-case safety
+
+
+9.2 Weight Selection with AHP
+
+The paper uses the Analytic Hierarchy Process (AHP) to derive weights. It reports approximate final weights:
+
+t1 = 0.7
+t2 = 0.2
+t3 = 0.1
+
+Meaning:
+
+- Path length is treated as most important.
+- Average safety is second.
+- Minimum safety is still considered, but with lower weight.
+
+Significance:
+
+- The evaluation prioritizes efficiency while still accounting for safety.
+
+
+10. Path Executability Verification
+
+A key strength of the paper is that it does not stop at path generation. It asks:
+
+"Can a real controller actually track this path?"
+
+To answer this, the authors test the generated trajectory using:
+
+- PID
+- LQR
+- ELQR
+
+The controller dynamics are described in discrete-time state update form:
+
+v_k_plus_1 = v_k + u_k * dt
+x_k_plus_1 = x_k + v_k_plus_1 * dt
+
+Meaning:
+
+- x_k is position at time step k.
+- v_k is velocity.
+- u_k is control input.
+- dt is the time step.
+
+Significance:
+
+- This connects path planning with actual flight execution.
+- A path that is mathematically valid but impossible to track is not practically useful.
+
+
+11. Main Experimental Findings
+
+The paper compares FP-APF with:
+
+- TAPF
+- RRT
+- IAPF
+- MAPF
+- GWO-APF
+
+The main conclusions reported are:
+
+- FP-APF usually has the best or near-best planning time.
+- FP-APF maintains good safety margins.
+- FP-APF often gives the best weighted score across static, dynamic, and complex environments.
+- In highly complex environments, it may not always give the shortest path, but it remains more reliable overall.
+
+In controller tests:
+
+- all tested controllers can track the FP-APF path
+- ELQR gives the best tracking performance
+- FP-APF is especially strong in practical executability and motion smoothness
+
+
+12. Why the Proposed Method Works
+
+The method succeeds because it combines complementary strengths:
+
+- APF contributes speed, simplicity, and directional structure.
+- PSO contributes local optimization and escape from poor local solutions.
+- Gaussian repulsion improves smoothness near obstacles.
+- Weighted evaluation ensures balanced comparison.
+- Controller verification checks real engineering usefulness.
+
+
+13. Main Contributions of the Paper
+
+The paper makes five academic contributions:
+
+- It proposes a 3D UAV path planner that fuses APF and PSO.
+- It improves obstacle avoidance with a Gaussian repulsive model.
+- It introduces local PSO refinement around APF-guided points.
+- It defines a weighted evaluation score based on path efficiency and safety.
+- It validates path executability using controller-level trajectory tracking.
+
+
+14. Limitations
+
+The paper also admits some limits:
+
+- In very complex environments, path length can increase.
+- Optimization still has computational cost.
+- The exact balance between APF guidance and PSO refinement depends on parameter settings.
+
+
+15. Final Interpretation
+
+This paper is important because it moves beyond a simple "find any collision-free path" viewpoint. It treats UAV path planning as a combined problem of:
+
+- geometric safety
+- route efficiency
+- algorithmic robustness
+- practical trackability
+
+In academic terms, the work contributes a hybrid optimization-based planner for 3D UAV navigation that is more stable than plain APF and more practical than a fully global swarm search.
+
+
+16. Equation Summary
+
+Core equations in compact Python-style form:
+
+U_q = U_att_q + U_rep_q
+
+U_att_q = 0.5 * k_att * norm(q - q_goal)**2
+
+F_att_q = k_att * (q_goal - q)
+
+if rho_q <= rho_0:
+    U_rep_q = 0.5 * k_rep * ((1.0 / rho_q) - (1.0 / rho_0))**2
+else:
+    U_rep_q = 0.0
+
+F_total = F_att + sum(F_rep_i for i in obstacles)
+
+F_rep_q = K_rep * exp(-(rho_q**2) / (2 * sigma**2)) * ((1.0 / rho_q) - (1.0 / rho_d)) * n_d
+
+v_i_next = w * v_i + c1 * r1 * (p_best_i - x_i) + c2 * r2 * (g_best - x_i)
+
+x_i_next = x_i + v_i_next
+
+x_apf = x_t + F_total
+
+x_i = x_apf + epsilon_i
+
+f_x_i = norm(x_i - x_goal) + sum(P_k(x_i) for k in obstacles)
+
+x_t_next = alpha * x_apf + (1 - alpha) * g_best
+
+score = t1 * (1 - L / L_max) + t2 * (D_avg / D_avg_max) + t3 * (D_min / D_min_max)
+
+v_k_plus_1 = v_k + u_k * dt
+x_k_plus_1 = x_k + v_k_plus_1 * dt
+
+
+17. Note on Fidelity
+
+This rewrite is based on text extracted from the local PDF. A few formulas, especially the Gaussian repulsive expression, were partially degraded during PDF text extraction. For those places, the equations above are reconstructed in standard mathematical form to preserve the method's meaning and intent.

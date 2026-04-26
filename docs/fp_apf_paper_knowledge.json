@@ -1,0 +1,258 @@
+{
+  "paper": {
+    "title": "UAV 3D Path Planning Based on Integrated Particle Swarm Optimization and Artificial Potential Field Method",
+    "domain": "3D UAV path planning",
+    "goal": "Generate safe, efficient, and executable UAV trajectories in complex 3D environments using a hybrid of APF and PSO.",
+    "keywords": [
+      "UAV",
+      "3D path planning",
+      "Artificial Potential Field",
+      "Particle Swarm Optimization",
+      "Gaussian repulsive function",
+      "path executability verification"
+    ]
+  },
+  "problem_statement": {
+    "summary": "Traditional APF is computationally efficient but can fail in complex environments because of local minima, oscillations near obstacles, and target inaccessibility. Pure swarm optimization can improve search quality but may be slower or unstable if used globally. The paper addresses these limitations by combining APF guidance with local PSO refinement.",
+    "why_3d_is_hard": [
+      "Obstacle distribution is more complex in 3D than in 2D.",
+      "The path should avoid both static and dynamic obstacles.",
+      "The trajectory should balance path length, safety margin, and smoothness.",
+      "The planned path should remain trackable by a realistic controller."
+    ]
+  },
+  "baseline_methods": {
+    "apf": {
+      "strengths": [
+        "Simple to implement",
+        "Fast directional guidance",
+        "Suitable for online local planning"
+      ],
+      "weaknesses": [
+        "Local minimum problem",
+        "Unreachable target problem",
+        "Oscillation near obstacle boundaries"
+      ]
+    },
+    "pso": {
+      "strengths": [
+        "Population-based search",
+        "Strong local and global candidate exploration",
+        "Can help escape APF traps"
+      ],
+      "weaknesses": [
+        "Can converge prematurely",
+        "Sensitive to parameters",
+        "Less efficient if used as a full global planner at every step"
+      ]
+    }
+  },
+  "proposed_method": {
+    "name": "FP-APF",
+    "full_name": "Fusion of Particle Swarm Optimization and Artificial Potential Field",
+    "high_level_pipeline": [
+      "Compute APF attraction and Gaussian-based repulsion at the current UAV state.",
+      "Use the resulting force to generate an APF guidance point.",
+      "Initialize a local PSO swarm around the APF guidance point.",
+      "Optimize the local next waypoint using a goal-distance-plus-obstacle-penalty fitness.",
+      "Fuse the APF guidance point and PSO global best to update the next UAV path point."
+    ],
+    "main_innovations": [
+      "Gaussian repulsive force for smoother obstacle influence",
+      "Local PSO refinement around APF guidance rather than full global PSO",
+      "Weighted path quality score using path length and safety metrics",
+      "Controller-level executability verification"
+    ]
+  },
+  "equations": [
+    {
+      "id": "total_potential",
+      "python_form": "U_q = U_att_q + U_rep_q",
+      "meaning": "Total potential at position q equals attractive plus repulsive potential.",
+      "significance": "Defines the APF energy landscape that guides motion."
+    },
+    {
+      "id": "attractive_potential",
+      "python_form": "U_att_q = 0.5 * k_att * norm(q - q_goal)**2",
+      "meaning": "Quadratic attraction increases with distance from the goal.",
+      "significance": "Creates smooth pull toward the destination."
+    },
+    {
+      "id": "attractive_force",
+      "python_form": "F_att_q = k_att * (q_goal - q)",
+      "meaning": "Attractive force points toward the goal.",
+      "significance": "Provides the direct motion tendency in APF."
+    },
+    {
+      "id": "classical_repulsive_potential",
+      "python_form": "U_rep_q = 0.5 * k_rep * ((1.0 / rho_q) - (1.0 / rho_0))**2 if rho_q <= rho_0 else 0.0",
+      "meaning": "Classical obstacle repulsion acts only inside an influence radius.",
+      "significance": "Prevents collision but changes abruptly near the boundary."
+    },
+    {
+      "id": "gaussian_repulsive_force",
+      "python_form": "F_rep_q = K_rep * exp(-(rho_q**2) / (2 * sigma**2)) * ((1.0 / rho_q) - (1.0 / rho_d)) * n_d",
+      "meaning": "Repulsive force decays smoothly with distance and points away from the obstacle.",
+      "significance": "Improves smoothness, reduces oscillation, and weakens far-obstacle interference."
+    },
+    {
+      "id": "total_force",
+      "python_form": "F_total = F_att + sum(F_rep_i for i in obstacles)",
+      "meaning": "Net APF force is the sum of attraction and all obstacle repulsions.",
+      "significance": "Defines the APF guidance direction."
+    },
+    {
+      "id": "apf_guidance_point",
+      "python_form": "x_apf = x_t + F_total",
+      "meaning": "APF proposes the next local guidance point.",
+      "significance": "Provides a fast deterministic guess before PSO refinement."
+    },
+    {
+      "id": "particle_initialization",
+      "python_form": "x_i = x_apf + epsilon_i",
+      "meaning": "Each particle starts near the APF guidance point.",
+      "significance": "Turns PSO into a local refinement mechanism instead of a global blind search."
+    },
+    {
+      "id": "particle_noise_distribution",
+      "python_form": "epsilon_i ~ Normal(0, sigma**2 * I)",
+      "meaning": "Particle perturbation is Gaussian in 3D.",
+      "significance": "Controls local exploration spread."
+    },
+    {
+      "id": "fitness",
+      "python_form": "f_x_i = norm(x_i - x_goal) + sum(P_k(x_i) for k in obstacles)",
+      "meaning": "Fitness balances target closeness and obstacle avoidance penalty.",
+      "significance": "Lets the swarm search for safe and efficient next waypoints."
+    },
+    {
+      "id": "pso_velocity_update",
+      "python_form": "v_i_next = w * v_i + c1 * r1 * (p_best_i - x_i) + c2 * r2 * (g_best - x_i)",
+      "meaning": "Particle velocity is updated using inertia, personal memory, and swarm memory.",
+      "significance": "Controls exploration and exploitation in PSO."
+    },
+    {
+      "id": "pso_position_update",
+      "python_form": "x_i_next = x_i + v_i_next",
+      "meaning": "Particle position advances using the updated velocity.",
+      "significance": "Performs the iterative search motion in continuous space."
+    },
+    {
+      "id": "path_point_fusion",
+      "python_form": "x_t_next = alpha * x_apf + (1 - alpha) * g_best",
+      "meaning": "The next path point is a weighted blend of APF guidance and PSO optimum.",
+      "significance": "Balances fast field guidance with local optimization."
+    },
+    {
+      "id": "weighted_score",
+      "python_form": "score = t1 * (1 - L / L_max) + t2 * (D_avg / D_avg_max) + t3 * (D_min / D_min_max)",
+      "meaning": "The evaluation score combines efficiency and safety.",
+      "significance": "Allows fair ranking across different algorithms and scenarios."
+    },
+    {
+      "id": "weight_constraint",
+      "python_form": "t1 + t2 + t3 = 1",
+      "meaning": "Metric weights sum to one.",
+      "significance": "Keeps the composite score normalized and interpretable."
+    },
+    {
+      "id": "controller_state_update_velocity",
+      "python_form": "v_k_plus_1 = v_k + u_k * dt",
+      "meaning": "Controller updates velocity using control input.",
+      "significance": "Used in executability verification."
+    },
+    {
+      "id": "controller_state_update_position",
+      "python_form": "x_k_plus_1 = x_k + v_k_plus_1 * dt",
+      "meaning": "Controller updates position using the new velocity.",
+      "significance": "Connects path planning with actual trajectory execution."
+    }
+  ],
+  "algorithm_summary": {
+    "inputs": [
+      "start point",
+      "goal point",
+      "obstacle set",
+      "APF parameters",
+      "PSO parameters",
+      "maximum iterations",
+      "goal threshold"
+    ],
+    "outputs": [
+      "planned 3D path",
+      "evaluation metrics",
+      "controller tracking results"
+    ],
+    "pseudo_steps": [
+      "Initialize current point at the start state.",
+      "Compute attraction and Gaussian repulsion.",
+      "Build APF guidance point using the net force.",
+      "Sample a local swarm near the guidance point.",
+      "Iteratively update velocities and positions with PSO.",
+      "Select global best particle according to the fitness.",
+      "Fuse APF and PSO outputs into the next path point.",
+      "Repeat until the goal threshold or iteration limit is reached."
+    ]
+  },
+  "evaluation": {
+    "path_metrics": [
+      {
+        "name": "path_length",
+        "description": "Total path distance. Lower is better."
+      },
+      {
+        "name": "average_safety_distance",
+        "description": "Average clearance to obstacles. Higher is better."
+      },
+      {
+        "name": "minimum_safety_distance",
+        "description": "Worst-case clearance to obstacles. Higher is better."
+      }
+    ],
+    "ahp_weights": {
+      "path_length": 0.7,
+      "average_safety_distance": 0.2,
+      "minimum_safety_distance": 0.1
+    },
+    "controller_metrics": [
+      "RMSE",
+      "Max_err",
+      "Final_err",
+      "Mean_jerk",
+      "Max_jerk",
+      "Robustness",
+      "DAR"
+    ]
+  },
+  "reported_findings": {
+    "qualitative": [
+      "FP-APF usually has strong planning efficiency.",
+      "FP-APF provides better safety balance than plain APF in complex scenes.",
+      "FP-APF performs well in static, dynamic, and more complex environments.",
+      "Controller tests suggest the generated path is practically executable.",
+      "ELQR gives the strongest tracking performance among tested controllers."
+    ],
+    "limitations": [
+      "In highly complex environments the path may be longer than the shortest baseline.",
+      "The hybrid method still depends on parameter tuning.",
+      "Controller verification is simulation-based rather than full real-world flight validation."
+    ]
+  },
+  "reproduction_notes": {
+    "what_to_implement_first": [
+      "3D obstacle model",
+      "APF attraction and Gaussian repulsion",
+      "Local PSO around APF guidance point",
+      "Path metrics",
+      "Visualization",
+      "Optional controller tracking layer"
+    ],
+    "minimum_reproducible_experiment": [
+      "Create a 3D start-goal map with cylindrical obstacles.",
+      "Run APF alone and FP-APF on the same environment.",
+      "Compare path length, average clearance, and minimum clearance.",
+      "Plot the generated paths in 3D."
+    ],
+    "note_on_fidelity": "Some formula tokens in the PDF text extraction were noisy. The JSON stores reconstructed standard-form equations that preserve the method described in the paper."
+  }
+}

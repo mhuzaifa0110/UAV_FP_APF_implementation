@@ -1,0 +1,96 @@
+{
+  "environments": [
+    {
+      "key": "saved_custom_saved_custom_environment",
+      "name": "Saved Custom Environment",
+      "description": "Saved custom environment.",
+      "start": [
+        10.0,
+        10.0,
+        0.0
+      ],
+      "goal": [
+        140.0,
+        140.0,
+        48.0
+      ],
+      "bounds": [
+        [
+          0.0,
+          155.0
+        ],
+        [
+          0.0,
+          155.0
+        ],
+        [
+          0.0,
+          80.0
+        ]
+      ],
+      "accent_rgb": [
+        0.22,
+        0.58,
+        0.62
+      ],
+      "obstacles": [
+        {
+          "center_xy": [
+            45.0,
+            55.0
+          ],
+          "radius": 10.0,
+          "height": 45.0,
+          "color_rgba": [
+            0.44,
+            0.63,
+            0.76,
+            0.35
+          ]
+        },
+        {
+          "center_xy": [
+            82.0,
+            82.0
+          ],
+          "radius": 12.0,
+          "height": 58.0,
+          "color_rgba": [
+            0.89,
+            0.66,
+            0.31,
+            0.35
+          ]
+        },
+        {
+          "center_xy": [
+            112.0,
+            105.0
+          ],
+          "radius": 9.0,
+          "height": 42.0,
+          "color_rgba": [
+            0.53,
+            0.7,
+            0.59,
+            0.35
+          ]
+        },
+        {
+          "center_xy": [
+            107.0,
+            65.0
+          ],
+          "radius": 8.0,
+          "height": 40.0,
+          "color_rgba": [
+            0.78,
+            0.42,
+            0.45,
+            0.35
+          ]
+        }
+      ]
+    }
+  ]
+}
