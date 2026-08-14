@@ -45,12 +45,20 @@ QLabel#HintLabel {
     font-size: 8pt;
     color: #7a6b59;
 }
+QLabel#HeaderFieldLabel {
+    font-size: 8pt;
+    font-weight: 700;
+    color: #5d6e73;
+}
 QComboBox, QDoubleSpinBox, QSpinBox, QLineEdit {
     background: #fffdf8;
     color: #24323a;
     border: 1px solid #ccbfae;
     border-radius: 10px;
     padding: 6px 10px;
+}
+QComboBox#HeaderCombo {
+    min-width: 150px;
 }
 QComboBox::drop-down {
     border: none;

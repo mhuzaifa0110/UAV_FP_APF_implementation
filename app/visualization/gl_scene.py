@@ -6,7 +6,7 @@ import numpy as np
 import pyqtgraph.opengl as gl
 from pyqtgraph.Qt import QtGui
 
-from ..simulation.geometry import CylinderObstacle, EnvironmentSpec, Vector3
+from ..simulation.geometry import CylinderObstacle, EnvironmentSpec, Obstacle, PolygonPrismObstacle, Vector3
 
 
 class UAVScene(gl.GLViewWidget):
@@ -116,7 +116,7 @@ class UAVScene(gl.GLViewWidget):
             self.addItem(label)
             self._axis_items.append(label)
 
-    def _draw_obstacles(self, obstacles: Sequence[CylinderObstacle]) -> None:
+    def _draw_obstacles(self, obstacles: Sequence[Obstacle]) -> None:
         for obstacle in obstacles:
             item = self._build_obstacle_item(obstacle)
             self.addItem(item)
@@ -125,22 +125,52 @@ class UAVScene(gl.GLViewWidget):
 
     def _build_obstacle_item(
         self,
-        obstacle: CylinderObstacle,
+        obstacle: Obstacle,
         color: tuple[float, float, float, float] | None = None,
         draw_edges: bool = False,
     ) -> gl.GLMeshItem:
-        mesh = gl.MeshData.cylinder(rows=2, cols=32, radius=[obstacle.radius, obstacle.radius], length=obstacle.height)
+        if isinstance(obstacle, PolygonPrismObstacle):
+            mesh = self._polygon_prism_mesh(obstacle)
+        else:
+            mesh = gl.MeshData.cylinder(
+                rows=2,
+                cols=32,
+                radius=[obstacle.radius, obstacle.radius],
+                length=obstacle.height,
+            )
         item = gl.GLMeshItem(
             meshdata=mesh,
             color=color or obstacle.color_rgba,
-            smooth=True,
+            smooth=isinstance(obstacle, CylinderObstacle),
             shader="shaded",
             drawEdges=draw_edges,
             drawFaces=True,
         )
-        cx, cy = obstacle.center_xy
-        item.translate(cx, cy, obstacle.height / 2.0)
+        if isinstance(obstacle, CylinderObstacle):
+            cx, cy = obstacle.center_xy
+            item.translate(cx, cy, obstacle.base_z)
         return item
+
+    def _polygon_prism_mesh(self, obstacle: PolygonPrismObstacle) -> gl.MeshData:
+        footprint = obstacle.world_vertices_xy
+        count = len(footprint)
+        base_z = obstacle.base_z
+        top_z = obstacle.base_z + obstacle.height
+        vertices = [(x, y, base_z) for x, y in footprint] + [(x, y, top_z) for x, y in footprint]
+
+        faces: list[tuple[int, int, int]] = []
+        for index in range(1, count - 1):
+            faces.append((0, index + 1, index))
+            faces.append((count, count + index, count + index + 1))
+        for index in range(count):
+            next_index = (index + 1) % count
+            faces.append((index, next_index, count + next_index))
+            faces.append((index, count + next_index, count + index))
+
+        return gl.MeshData(
+            vertexes=np.array(vertices, dtype=float),
+            faces=np.array(faces, dtype=int),
+        )
 
     def _draw_markers(self, start: Vector3, goal: Vector3) -> None:
         self._start_item = gl.GLScatterPlotItem(pos=np.array([start], dtype=float), color=(0.12, 0.36, 0.78, 1.0), size=10)
@@ -150,23 +180,33 @@ class UAVScene(gl.GLViewWidget):
         self.update_uav_position(start)
 
     def highlight_obstacle(self, selected_index: int | None) -> None:
-        for index, item in enumerate(self._obstacle_items):
-            if index == selected_index:
-                item.setColor((1.0, 0.18, 0.08, 0.72))
-            elif index < len(self._obstacle_colors):
-                item.setColor(self._obstacle_colors[index])
+        self._apply_obstacle_highlight(selected_index)
         self.update()
 
-    def set_preview_obstacle(self, obstacle: CylinderObstacle | None) -> None:
+    def _apply_obstacle_highlight(self, selected_index: int | None, dim_selected: bool = False) -> None:
+        for index, item in enumerate(self._obstacle_items):
+            if index == selected_index:
+                if dim_selected and index < len(self._obstacle_colors):
+                    base_color = self._obstacle_colors[index]
+                    item.setColor((base_color[0], base_color[1], base_color[2], 0.14))
+                else:
+                    item.setColor((1.0, 0.18, 0.08, 0.72))
+            elif index < len(self._obstacle_colors):
+                item.setColor(self._obstacle_colors[index])
+
+    def set_preview_obstacle(self, obstacle: Obstacle | None, selected_index: int | None = None) -> None:
         if self._preview_item is not None:
             self.removeItem(self._preview_item)
             self._preview_item = None
         if obstacle is None:
+            self._apply_obstacle_highlight(selected_index)
             self.update()
             return
+        self._apply_obstacle_highlight(selected_index, dim_selected=selected_index is not None)
+        preview_color = (1.0, 0.18, 0.08, 0.46) if selected_index is not None else (1.0, 0.84, 0.18, 0.28)
         self._preview_item = self._build_obstacle_item(
             obstacle,
-            color=(1.0, 0.84, 0.18, 0.28),
+            color=preview_color,
             draw_edges=True,
         )
         self.addItem(self._preview_item)

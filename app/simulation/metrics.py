@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from .geometry import CylinderObstacle, Vector3, norm, sub
+from .geometry import Obstacle, Vector3, norm, sub
 
 
 def path_length(path: Sequence[Vector3]) -> float:
@@ -14,7 +14,7 @@ def path_length(path: Sequence[Vector3]) -> float:
 
 def clearance_stats(
     path: Sequence[Vector3],
-    obstacles: Sequence[CylinderObstacle],
+    obstacles: Sequence[Obstacle],
     drone_radius: float = 0.0,
 ) -> tuple[float, float]:
     if not path:
@@ -38,7 +38,7 @@ class PathMetrics:
 
 def summarize_path(
     path: Sequence[Vector3],
-    obstacles: Sequence[CylinderObstacle],
+    obstacles: Sequence[Obstacle],
     drone_radius: float = 0.0,
 ) -> PathMetrics:
     avg_clearance, min_clearance = clearance_stats(path, obstacles, drone_radius)

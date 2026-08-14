@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from .geometry import CylinderObstacle, EnvironmentSpec
+from .geometry import CylinderObstacle, EnvironmentSpec, PolygonPrismObstacle
 
 
 def build_environment_library() -> Dict[str, EnvironmentSpec]:
@@ -131,14 +131,28 @@ def build_environment_library() -> Dict[str, EnvironmentSpec]:
         "custom_sandbox": EnvironmentSpec(
             key="custom_sandbox",
             name="Custom Sandbox",
-            description="Editable environment for manually placing cylinder obstacles.",
+            description="Editable environment for manually placing 3D cylinder and polygon-prism obstacles.",
             start=(10.0, 10.0, 0.0),
             goal=(140.0, 140.0, 48.0),
             bounds=((0.0, 155.0), (0.0, 155.0), (0.0, 80.0)),
             obstacles=(
                 CylinderObstacle((45.0, 55.0), 10.0, 45.0, (0.44, 0.63, 0.76, 0.35)),
-                CylinderObstacle((82.0, 82.0), 12.0, 58.0, (0.89, 0.66, 0.31, 0.35)),
-                CylinderObstacle((112.0, 105.0), 9.0, 42.0, (0.53, 0.70, 0.59, 0.35)),
+                PolygonPrismObstacle.rectangle(
+                    center_xy=(82.0, 82.0),
+                    width=20.0,
+                    length=30.0,
+                    height=58.0,
+                    rotation_deg=20.0,
+                    color_rgba=(0.89, 0.66, 0.31, 0.35),
+                ),
+                PolygonPrismObstacle.rectangle(
+                    center_xy=(112.0, 105.0),
+                    width=18.0,
+                    length=18.0,
+                    height=42.0,
+                    rotation_deg=-15.0,
+                    color_rgba=(0.53, 0.70, 0.59, 0.35),
+                ),
             ),
             accent_rgb=(0.22, 0.58, 0.62),
         ),

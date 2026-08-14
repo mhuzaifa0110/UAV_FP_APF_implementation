@@ -1,0 +1,891 @@
+{
+  "document_title": "Explanation of the FP-APF Paper and Our Implementation",
+  "paper_title": "UAV 3D Path Planning Based on Integrated Particle Swarm Optimization and Artificial Potential Field Method",
+  "project_name": "Paper_Reprod FP-APF UAV Path Planning Reproduction",
+  "intended_readers": [
+    "Students who have not read the paper before.",
+    "Peers who know basic programming but may not know APF, PSO, or UAV path planning.",
+    "People who want to understand both the paper idea and our code implementation."
+  ],
+  "big_picture": {
+    "main_problem": "A drone must fly from a start point to a goal point in 3D space while avoiding obstacles.",
+    "why_this_is_not_easy": [
+      "The drone must move in x, y, and z directions.",
+      "Tall obstacles can block the direct path.",
+      "A short path is good, but it must also be safe.",
+      "A path can look good on a plot but still be hard for a real drone to follow."
+    ],
+    "main_solution": "The paper combines Artificial Potential Field (APF) and Particle Swarm Optimization (PSO). APF gives a fast direction. PSO improves the next point by searching near that direction.",
+    "simple_analogy": "Imagine the goal is pulling the drone like a magnet, and obstacles are pushing it away. APF gives this push-pull direction. Then PSO checks many nearby possible next points and chooses a better one."
+  },
+  "important_terms": {
+    "UAV": "Unmanned Aerial Vehicle. In this project, it means the drone.",
+    "path": "A list of 3D points. The drone follows these points from start to goal.",
+    "trajectory": "A path with movement behavior. It includes how the drone moves between points.",
+    "waypoint": "One point on the path.",
+    "obstacle": "In our implementation, obstacles are vertical cylinders with radius and height.",
+    "clearance": "Distance between the drone and the nearest obstacle surface. Bigger clearance means safer flight.",
+    "collision_margin": "Extra safety distance that we want to keep from obstacles.",
+    "drone_radius": "The physical size of the drone, modeled as a radius."
+  },
+  "paper_method_summary": {
+    "method_name": "FP-APF",
+    "full_name": "Fusion of Particle Swarm Optimization and Artificial Potential Field",
+    "main_steps": [
+      "Start at the initial drone position.",
+      "Compute attraction toward the goal.",
+      "Compute repulsion away from every obstacle.",
+      "Add attraction and repulsion to get one total APF force.",
+      "Normalize this force and create a short APF guidance step.",
+      "Start a PSO swarm near this APF guidance point.",
+      "Let PSO search nearby points and find the best safe point.",
+      "Fuse the APF guidance point and the PSO best point.",
+      "Check that the movement is safe and feasible.",
+      "Repeat until the drone reaches the goal or the maximum iteration limit is reached."
+    ],
+    "why_apf_and_pso_are_combined": {
+      "apf_strength": "APF is fast and gives a clear movement direction.",
+      "apf_weakness": "APF can get stuck when attraction and repulsion cancel each other.",
+      "pso_strength": "PSO can search many nearby options and may escape a poor APF decision.",
+      "pso_weakness": "PSO alone can be slow if it searches the whole 3D world.",
+      "fusion_benefit": "APF keeps the search focused, and PSO improves the local choice."
+    }
+  },
+  "equations_from_the_paper": [
+    {
+      "id": "eq_01_total_potential",
+      "name": "Total potential field",
+      "equation_python_style": "U_q = U_att_q + U_rep_q",
+      "symbols": {
+        "U_q": "Total potential energy at current position q.",
+        "U_att_q": "Attractive potential from the goal.",
+        "U_rep_q": "Repulsive potential from obstacles."
+      },
+      "simple_meaning": "The drone feels one combined virtual field. The goal creates attraction and obstacles create repulsion.",
+      "in_our_code": "The improved planner mainly uses forces, not total potential. The classic APF implementation keeps potential functions in app/simulation/classic_apf.py.",
+      "example": "If the drone is near the goal and far from obstacles, attraction is the main effect. If the drone is near a wall, repulsion becomes important."
+    },
+    {
+      "id": "eq_02_attractive_potential",
+      "name": "Attractive potential",
+      "equation_python_style": "U_att_q = 0.5 * k_att * norm(q - q_goal)**2",
+      "symbols": {
+        "q": "Current drone position.",
+        "q_goal": "Goal position.",
+        "k_att": "Attraction strength.",
+        "norm(q - q_goal)": "Distance from the drone to the goal."
+      },
+      "simple_meaning": "The farther the drone is from the goal, the larger the attraction energy becomes.",
+      "behavior_effect": "This makes the drone want to reduce its distance to the goal.",
+      "in_our_code": "Classic APF uses attractive_potential() in app/simulation/classic_apf.py. FP-APF uses the related force directly in attractive_force().",
+      "example": "If the drone is 100 meters from the goal, attraction is strong. If it is 2 meters from the goal, attraction is small."
+    },
+    {
+      "id": "eq_03_attractive_force",
+      "name": "Attractive force",
+      "equation_python_style": "F_att_q = k_att * (q_goal - q)",
+      "symbols": {
+        "F_att_q": "Force pulling the drone toward the goal.",
+        "k_att": "Attraction strength.",
+        "q_goal - q": "Direction from current position to the goal."
+      },
+      "simple_meaning": "This force points directly from the drone to the goal.",
+      "behavior_effect": "Higher k_att makes the drone more eager to move toward the goal.",
+      "trajectory_effect": "If k_att is too high, the path may become aggressive and may pass too close to obstacles. If k_att is too low, the drone may move slowly or be pushed too much by obstacles.",
+      "in_our_code": "app/simulation/planner.py uses attractive_force(q, q_goal, k_att). Default FPAPFConfig.k_att is 3.4.",
+      "example": "In an open field, high attraction gives a direct path. In a dense obstacle field, too much attraction can pull the drone into a narrow unsafe route."
+    },
+    {
+      "id": "eq_04_classical_repulsive_potential",
+      "name": "Classical repulsive potential",
+      "equation_python_style": "if rho_q <= rho_0: U_rep_q = 0.5 * k_rep * ((1.0 / rho_q) - (1.0 / rho_0))**2 else: U_rep_q = 0.0",
+      "symbols": {
+        "rho_q": "Distance from the drone to the obstacle.",
+        "rho_0": "Obstacle influence distance.",
+        "k_rep": "Repulsion strength."
+      },
+      "simple_meaning": "An obstacle only pushes the drone when the drone is inside the obstacle influence range.",
+      "paper_reason": "This is the older APF repulsion model. The paper discusses its problems.",
+      "problem": "The force can change sharply near the influence boundary. This can make the path shake or oscillate.",
+      "in_our_code": "classic_apf.py uses this style in repulsive_potential() and repulsive_force(). The improved FP-APF planner uses Gaussian repulsion instead.",
+      "example": "If rho_0 is 12 meters, an obstacle 20 meters away has no effect. When the drone crosses inside 12 meters, the repulsion suddenly starts."
+    },
+    {
+      "id": "eq_05_gaussian_repulsive_force",
+      "name": "Gaussian repulsive force",
+      "equation_python_style": "F_rep_q = K_rep * exp(-(rho_q**2) / (2 * sigma**2)) * ((1.0 / rho_q) - (1.0 / rho_d)) * n_d",
+      "symbols": {
+        "F_rep_q": "Force pushing the drone away from an obstacle.",
+        "K_rep": "Repulsion gain.",
+        "rho_q": "Distance or clearance from obstacle.",
+        "sigma": "Gaussian width. It controls how smoothly repulsion fades with distance.",
+        "rho_d": "Effective influence distance.",
+        "n_d": "Unit direction from obstacle surface toward the drone."
+      },
+      "simple_meaning": "The obstacle pushes strongly when the drone is close, and the push fades smoothly when the drone moves away.",
+      "paper_reason": "The Gaussian term makes obstacle influence smoother than classical APF.",
+      "behavior_effect": "This reduces sudden turns and helps avoid shaking near obstacles.",
+      "trajectory_effect": "The path can become smoother and safer around cylinders.",
+      "in_our_code": "app/simulation/planner.py uses gaussian_repulsive_force(). Our code subtracts drone_radius from clearance before computing rho_q, so the physical drone size is considered.",
+      "example": "Near a tower, the drone gets a strong side push. Far from the tower, the push becomes almost zero instead of changing suddenly."
+    },
+    {
+      "id": "eq_06_total_force",
+      "name": "Total APF force",
+      "equation_python_style": "F_total = F_att + sum(F_rep_i for i in obstacles)",
+      "symbols": {
+        "F_total": "Final virtual force used by APF.",
+        "F_att": "Goal attraction.",
+        "F_rep_i": "Repulsion from obstacle i."
+      },
+      "simple_meaning": "The drone adds the goal pull and all obstacle pushes.",
+      "behavior_effect": "This gives one movement direction for the next planning step.",
+      "in_our_code": "fp_apf_plan() computes f_att, f_rep, f_total, and then normalizes f_total.",
+      "example": "If the goal is ahead and an obstacle is on the left, the total force may point forward and slightly right."
+    },
+    {
+      "id": "eq_07_apf_guidance_point",
+      "name": "APF guidance point",
+      "equation_python_style": "x_apf = x_t + normalized(F_total) * step_scale",
+      "symbols": {
+        "x_t": "Current drone position at this planning step.",
+        "x_apf": "Next point suggested by APF.",
+        "step_scale": "Length of the APF step in our implementation."
+      },
+      "simple_meaning": "APF gives a short step in the direction of the total force.",
+      "paper_note": "The paper describes x_apf as a point created from APF guidance. Our code normalizes the force and controls step length with step_scale.",
+      "behavior_effect": "The APF point is the center of the local PSO search.",
+      "trajectory_effect": "A bigger step_scale creates longer jumps and fewer points. A smaller step_scale creates slower and denser movement.",
+      "in_our_code": "x_apf = add(current, mul(direction, cfg.step_scale)) in app/simulation/planner.py.",
+      "example": "If step_scale is 0.5, the APF guidance point is close to the current drone. If step_scale is 3.0, the drone tries a much larger local step."
+    },
+    {
+      "id": "eq_08_particle_initialization",
+      "name": "Particle initialization around APF point",
+      "equation_python_style": "x_i = x_apf + epsilon_i",
+      "symbols": {
+        "x_i": "Position of particle i.",
+        "x_apf": "APF guidance point.",
+        "epsilon_i": "Small random 3D offset."
+      },
+      "simple_meaning": "Each particle starts near the APF suggestion, not anywhere in the whole world.",
+      "behavior_effect": "This makes PSO a local improvement tool.",
+      "trajectory_effect": "The drone searches near a useful direction but can still correct the point if obstacles are nearby.",
+      "in_our_code": "initialize_particles() uses position = x_apf + random_gaussian_vector(init_sigma).",
+      "example": "If APF suggests a point near an obstacle edge, particles spread around it. Some particles may find a safer point slightly above or beside the obstacle."
+    },
+    {
+      "id": "eq_09_particle_noise_distribution",
+      "name": "Gaussian particle spread",
+      "equation_python_style": "epsilon_i ~ Normal(0, init_sigma**2 * I)",
+      "symbols": {
+        "epsilon_i": "Random offset added to a particle.",
+        "init_sigma": "Spread size of initial particles.",
+        "I": "Identity matrix, meaning spread is applied in x, y, and z."
+      },
+      "simple_meaning": "Particles are randomly placed around x_apf with a normal distribution.",
+      "behavior_effect": "Higher init_sigma means wider local search. Lower init_sigma means tighter search.",
+      "trajectory_effect": "Large init_sigma can find bigger detours but may make the path less stable. Small init_sigma keeps the path close to APF but may miss better safe points.",
+      "in_our_code": "FPAPFConfig.init_sigma default is 2.0.",
+      "example": "In a narrow passage, a slightly larger spread can help find the opening. In open space, a smaller spread is usually enough."
+    },
+    {
+      "id": "eq_10_fitness_function",
+      "name": "PSO fitness function",
+      "equation_python_style": "fitness(point) = norm(point - goal) + obstacle_penalty(point) + heading_smoothness_penalty(previous, current, point)",
+      "symbols": {
+        "norm(point - goal)": "Distance from candidate point to goal.",
+        "obstacle_penalty(point)": "Extra cost if the point is unsafe.",
+        "heading_smoothness_penalty": "Extra cost for sharp turns in our implementation."
+      },
+      "simple_meaning": "A good candidate is close to the goal, far enough from obstacles, and not a very sharp turn.",
+      "paper_note": "The paper fitness is goal distance plus obstacle penalty. Our implementation adds a heading smoothness penalty to make the path easier to follow.",
+      "behavior_effect": "The swarm chooses points with lower fitness.",
+      "trajectory_effect": "This affects both safety and path shape. More penalty makes the drone avoid risky points more strongly.",
+      "in_our_code": "fitness() is in app/simulation/planner.py.",
+      "example": "A point very close to the goal but inside an obstacle gets a very bad score. A point a little farther away but safe can win."
+    },
+    {
+      "id": "eq_11_obstacle_penalty",
+      "name": "Obstacle penalty",
+      "equation_python_style": "if clearance <= 0: penalty += gain * 1000 else if clearance < margin: penalty += gain * ((margin - clearance) / margin)**2",
+      "symbols": {
+        "clearance": "Distance from drone body to obstacle surface.",
+        "gain": "obstacle_penalty_gain.",
+        "margin": "collision_margin."
+      },
+      "simple_meaning": "A collision gets a huge penalty. A point inside the safety margin gets a smaller but still important penalty.",
+      "behavior_effect": "This makes unsafe particles lose during PSO.",
+      "trajectory_effect": "Higher gain and higher margin push the path farther away from obstacles.",
+      "in_our_code": "obstacle_penalty() is in app/simulation/planner.py.",
+      "example": "If margin is 0.5, a candidate 0.2 meters from an obstacle is punished. A candidate 1.0 meter away is not punished by this term."
+    },
+    {
+      "id": "eq_12_pso_velocity_update",
+      "name": "PSO velocity update",
+      "equation_python_style": "v_i_next = w * v_i + c1 * r1 * (p_best_i - x_i) + c2 * r2 * (g_best - x_i)",
+      "symbols": {
+        "v_i_next": "New particle velocity.",
+        "w": "Inertia weight.",
+        "v_i": "Current particle velocity.",
+        "c1": "Cognitive coefficient. It controls trust in the particle's own best position.",
+        "c2": "Social coefficient. It controls trust in the swarm's best position.",
+        "r1": "Random number between 0 and 1.",
+        "r2": "Random number between 0 and 1.",
+        "p_best_i": "Best position found by this particle.",
+        "g_best": "Best position found by the whole swarm.",
+        "x_i": "Current particle position."
+      },
+      "simple_meaning": "Each particle moves using memory, group knowledge, and its current motion.",
+      "behavior_effect": "This controls how the local search explores and converges.",
+      "trajectory_effect": "Stable PSO gives smoother, safer next points. Poor PSO tuning can create noisy or slow planning.",
+      "in_our_code": "pso_refine() uses inertia, c1, c2, r1, and r2 exactly like this.",
+      "example": "If c2 is high, particles quickly follow the current best particle. If c1 is high, particles explore based more on their own past success."
+    },
+    {
+      "id": "eq_13_pso_position_update",
+      "name": "PSO position update",
+      "equation_python_style": "x_i_next = x_i + v_i_next",
+      "symbols": {
+        "x_i_next": "New particle position.",
+        "x_i": "Old particle position.",
+        "v_i_next": "Updated particle velocity."
+      },
+      "simple_meaning": "The particle moves to a new candidate point.",
+      "behavior_effect": "Many repeated updates let the swarm search for a better local waypoint.",
+      "in_our_code": "particle.position = add(particle.position, particle.velocity) in pso_refine().",
+      "example": "A particle that is moving upward and forward may test a point above a cylinder."
+    },
+    {
+      "id": "eq_14_personal_best_update",
+      "name": "Personal best update",
+      "equation_python_style": "if fitness(x_i) < fitness(p_best_i): p_best_i = x_i",
+      "symbols": {
+        "p_best_i": "Best point found by particle i.",
+        "fitness": "Cost value. Lower is better."
+      },
+      "simple_meaning": "A particle remembers the best point it has personally found.",
+      "behavior_effect": "This gives each particle memory.",
+      "in_our_code": "pso_refine() updates particle.best_position and particle.best_fitness.",
+      "example": "If a particle finds a safer point behind an obstacle edge, it remembers that point even if its next move is worse."
+    },
+    {
+      "id": "eq_15_global_best_update",
+      "name": "Global best update",
+      "equation_python_style": "g_best = best p_best_i among all particles",
+      "symbols": {
+        "g_best": "Best point found by the whole swarm."
+      },
+      "simple_meaning": "The swarm keeps one best answer found so far.",
+      "behavior_effect": "Other particles are pulled toward this best answer.",
+      "trajectory_effect": "This is the PSO point that later gets fused with the APF point.",
+      "in_our_code": "pso_refine() tracks g_best and g_best_fitness.",
+      "example": "If one particle finds a clean route around a tower, the rest of the swarm starts moving toward that option."
+    },
+    {
+      "id": "eq_16_path_point_fusion",
+      "name": "Fusion of APF and PSO",
+      "equation_python_style": "x_t_next = alpha * x_apf + (1 - alpha) * g_best",
+      "symbols": {
+        "x_t_next": "Next path point.",
+        "alpha": "Fusion coefficient.",
+        "x_apf": "APF guidance point.",
+        "g_best": "Best point found by PSO."
+      },
+      "simple_meaning": "The next drone point is a mix of the APF suggestion and the PSO best point.",
+      "behavior_effect": "Higher alpha trusts APF more. Lower alpha trusts PSO more.",
+      "trajectory_effect": "High alpha usually gives more direct APF-like movement. Low alpha gives more optimized but possibly more variable movement.",
+      "in_our_code": "next_point = alpha * x_apf + (1 - alpha) * g_best in fp_apf_plan(). Default alpha is 0.35.",
+      "example": "If alpha is 0.35, the final point uses 35 percent APF guidance and 65 percent PSO best point."
+    },
+    {
+      "id": "eq_17_weighted_score",
+      "name": "Paper path quality score",
+      "equation_python_style": "score = t1 * (1 - L / L_max) + t2 * (D_avg / D_avg_max) + t3 * (D_min / D_min_max)",
+      "symbols": {
+        "L": "Path length.",
+        "L_max": "Maximum path length used for normalization.",
+        "D_avg": "Average safety distance.",
+        "D_avg_max": "Maximum average safety distance used for normalization.",
+        "D_min": "Minimum safety distance.",
+        "D_min_max": "Maximum minimum safety distance used for normalization.",
+        "t1, t2, t3": "Weights for path length, average clearance, and minimum clearance."
+      },
+      "simple_meaning": "The paper compares paths using one score that includes shortness and safety.",
+      "behavior_effect": "This equation is for evaluation, not for moving the drone directly.",
+      "in_our_code": "Our GUI reports path length, average clearance, and minimum clearance separately. It does not currently compute this final weighted score in the GUI.",
+      "example": "A short path with dangerous clearance may not be best. A slightly longer but safer path may score better depending on the weights."
+    },
+    {
+      "id": "eq_18_weight_constraint",
+      "name": "Weight sum constraint",
+      "equation_python_style": "t1 + t2 + t3 = 1",
+      "symbols": {
+        "t1": "Weight for path length.",
+        "t2": "Weight for average clearance.",
+        "t3": "Weight for minimum clearance."
+      },
+      "simple_meaning": "All metric weights must add to 1.",
+      "paper_values": {
+        "t1": 0.7,
+        "t2": 0.2,
+        "t3": 0.1
+      },
+      "example": "The paper gives path length the largest weight, so efficiency is treated as very important."
+    },
+    {
+      "id": "eq_19_controller_velocity_update",
+      "name": "Controller velocity update",
+      "equation_python_style": "v_k_plus_1 = v_k + u_k * dt",
+      "symbols": {
+        "v_k_plus_1": "Next velocity.",
+        "v_k": "Current velocity.",
+        "u_k": "Control input, similar to acceleration command.",
+        "dt": "Time step."
+      },
+      "simple_meaning": "The drone velocity changes according to the control input.",
+      "paper_reason": "The paper checks if planned paths can be followed by controllers such as PID, LQR, and ELQR.",
+      "in_our_code": "This current GUI reproduction focuses on planning and visualization. It does not implement full PID, LQR, or ELQR tracking verification.",
+      "example": "If control input points upward, the drone velocity increases upward during the next time step."
+    },
+    {
+      "id": "eq_20_controller_position_update",
+      "name": "Controller position update",
+      "equation_python_style": "x_k_plus_1 = x_k + v_k_plus_1 * dt",
+      "symbols": {
+        "x_k_plus_1": "Next position.",
+        "x_k": "Current position.",
+        "v_k_plus_1": "Updated velocity.",
+        "dt": "Time step."
+      },
+      "simple_meaning": "The drone position changes based on its velocity.",
+      "paper_reason": "This connects path planning with actual movement.",
+      "in_our_code": "Our implementation includes feasibility checks like max_vertical_step, but not full controller simulation.",
+      "example": "If the drone has forward velocity, its next position moves forward."
+    }
+  ],
+  "how_we_implemented_the_paper": {
+    "main_files": {
+      "app/simulation/planner.py": "Main FP-APF planner implementation.",
+      "app/simulation/classic_apf.py": "Classic APF baseline implementation.",
+      "app/simulation/geometry.py": "3D vector math, cylinder obstacle model, and environment data types.",
+      "app/simulation/environments.py": "Preset 3D test environments.",
+      "app/simulation/metrics.py": "Path length and clearance metrics.",
+      "app/gui/main_window.py": "GUI controls, planner selection, parameter input, and visualization connection."
+    },
+    "obstacle_model": {
+      "shape": "Vertical cylinder.",
+      "properties": [
+        "center_xy",
+        "radius",
+        "height",
+        "base_z",
+        "color_rgba"
+      ],
+      "clearance_function": "CylinderObstacle.clearance(point) returns distance from the point to the cylinder surface.",
+      "direction_function": "CylinderObstacle.direction_to_point(point) returns a unit vector from the closest obstacle surface point to the drone point.",
+      "why_this_matters": "Repulsive force needs both distance and direction. Distance says how strong the push should be. Direction says where to push."
+    },
+    "fp_apf_planning_loop": [
+      {
+        "step": 1,
+        "name": "Set current point",
+        "description": "The path starts with the start point."
+      },
+      {
+        "step": 2,
+        "name": "Stop check",
+        "description": "If current point is within goal_threshold of the goal, planning can stop."
+      },
+      {
+        "step": 3,
+        "name": "Attraction",
+        "description": "Compute force from current point to goal using k_att."
+      },
+      {
+        "step": 4,
+        "name": "Repulsion",
+        "description": "Compute Gaussian repulsive force from all cylinder obstacles."
+      },
+      {
+        "step": 5,
+        "name": "Direction",
+        "description": "Add attraction and repulsion, then normalize the result."
+      },
+      {
+        "step": 6,
+        "name": "APF guidance point",
+        "description": "Move step_scale distance from current point in the normalized force direction."
+      },
+      {
+        "step": 7,
+        "name": "PSO refinement",
+        "description": "Create particles near x_apf and run PSO for pso_iterations."
+      },
+      {
+        "step": 8,
+        "name": "Fusion",
+        "description": "Blend x_apf and g_best using alpha."
+      },
+      {
+        "step": 9,
+        "name": "Feasibility and safety",
+        "description": "Limit vertical movement, check segment clearance, and repair unsafe candidate points."
+      },
+      {
+        "step": 10,
+        "name": "Append path point",
+        "description": "Add the accepted next point to the path and continue."
+      },
+      {
+        "step": 11,
+        "name": "Smooth final path",
+        "description": "Apply safe smoothing passes only if the smoothed path remains safe."
+      }
+    ],
+    "important_differences_from_the_paper": [
+      "The paper describes the method at algorithm level. Our implementation adds practical safety checks for line segments between waypoints.",
+      "The paper fitness uses goal distance plus obstacle penalty. Our implementation also adds heading_smoothness_penalty.",
+      "The paper discusses controller executability with PID, LQR, and ELQR. Our GUI reproduction focuses on planner behavior, path safety, metrics, and 3D visualization.",
+      "Our implementation models the drone radius, so obstacle clearance is reduced by drone_radius.",
+      "Our implementation repairs unsafe proposed moves by shrinking the step and trying lateral or vertical variants."
+    ],
+    "classic_apf_baseline": {
+      "purpose": "Used for comparison against FP-APF.",
+      "main_behavior": "Classic APF follows attraction and classical repulsion.",
+      "extra_practical_logic": "The baseline has candidate steps and small random escape behavior when force becomes too small.",
+      "why_compare": "It helps show why FP-APF is useful in difficult environments."
+    }
+  },
+  "parameter_control_in_the_gui": {
+    "visible_fp_apf_controls": [
+      {
+        "parameter": "step_scale",
+        "gui_label": "Step scale",
+        "range": "0.1 to 3.0",
+        "default": 0.5
+      },
+      {
+        "parameter": "alpha",
+        "gui_label": "Fusion alpha",
+        "range": "0.05 to 0.95",
+        "default": 0.35
+      },
+      {
+        "parameter": "swarm_size",
+        "gui_label": "Swarm size",
+        "range": "10 to 100",
+        "default": 40
+      },
+      {
+        "parameter": "pso_iterations",
+        "gui_label": "PSO iterations",
+        "range": "5 to 100",
+        "default": 35
+      }
+    ],
+    "hidden_or_code_level_parameters": "Other parameters are in FPAPFConfig inside app/simulation/planner.py. They can be changed in code but are not all exposed in the GUI.",
+    "random_seed": "The GUI calls the planner with seed=7, so repeated runs are easier to compare."
+  },
+  "fp_apf_parameters_and_effects": [
+    {
+      "name": "k_att",
+      "default": 3.4,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Strength of attraction toward the goal.",
+      "drone_behavior_effect": "Higher value pulls the drone more strongly toward the goal.",
+      "trajectory_planning_effect": "High k_att can make paths more direct. Too high can reduce safety near obstacles. Low k_att can make the drone too cautious or slow.",
+      "example_scenario": "In an open field, increasing k_att can shorten the path. In dense urban obstacles, too much k_att may pull the drone into obstacle gaps too aggressively."
+    },
+    {
+      "name": "k_rep",
+      "default": 6.0,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Strength of obstacle repulsion.",
+      "drone_behavior_effect": "Higher value pushes the drone away from obstacles more strongly.",
+      "trajectory_planning_effect": "High k_rep gives safer clearance but can cause longer detours. Low k_rep can make paths shorter but riskier.",
+      "example_scenario": "If the drone clips close to a cylinder, increase k_rep. If the drone makes a very wide detour in an easy scene, reduce k_rep."
+    },
+    {
+      "name": "rho_d",
+      "default": 6.0,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Effective obstacle influence distance.",
+      "drone_behavior_effect": "Larger rho_d lets obstacles affect the drone from farther away.",
+      "trajectory_planning_effect": "High rho_d can create earlier avoidance and smoother detours. Low rho_d delays avoidance and may create sharp late turns.",
+      "example_scenario": "For high-speed flight, larger rho_d is safer because the drone starts avoiding obstacles earlier."
+    },
+    {
+      "name": "gaussian_sigma",
+      "default": 4.0,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Width of Gaussian repulsion.",
+      "drone_behavior_effect": "Higher sigma makes obstacle repulsion fade more slowly with distance.",
+      "trajectory_planning_effect": "High sigma creates smoother, wider avoidance. Low sigma makes obstacle effect more local and can create sharper turns.",
+      "example_scenario": "In a narrow passage, too high sigma may make both walls push too much and block progress. A moderate value helps the drone pass through."
+    },
+    {
+      "name": "step_scale",
+      "default": 0.5,
+      "gui_control": true,
+      "where": "GUI and FPAPFConfig",
+      "controls": "How far the APF guidance point is from the current point.",
+      "drone_behavior_effect": "Higher value makes the drone take bigger planning steps.",
+      "trajectory_planning_effect": "High step_scale can reduce point count and planning time but may skip around obstacles too roughly. Low step_scale gives detailed paths but may need more iterations.",
+      "example_scenario": "For a smooth close-up path near many towers, use smaller step_scale. For open space, larger step_scale can be faster."
+    },
+    {
+      "name": "goal_threshold",
+      "default": 1.0,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "How close the drone must get before the goal is considered reached.",
+      "drone_behavior_effect": "Larger threshold lets the drone stop earlier.",
+      "trajectory_planning_effect": "High threshold may end before the exact goal. Low threshold requires more accurate final movement.",
+      "example_scenario": "If exact landing point matters, keep this small. If only reaching a region matters, it can be larger."
+    },
+    {
+      "name": "max_iterations",
+      "default": 400,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Maximum number of outer planning steps.",
+      "drone_behavior_effect": "Higher value allows the drone more chances to reach the goal.",
+      "trajectory_planning_effect": "Too low can stop planning early. Too high can cost more time if the planner is stuck.",
+      "example_scenario": "A complex map with many obstacles may need more iterations than an open map."
+    },
+    {
+      "name": "alpha",
+      "default": 0.35,
+      "gui_control": true,
+      "where": "GUI and FPAPFConfig",
+      "controls": "Balance between APF guidance and PSO result.",
+      "drone_behavior_effect": "Higher alpha follows APF more. Lower alpha follows PSO more.",
+      "trajectory_planning_effect": "High alpha can make the path more direct but more APF-like. Low alpha can improve local safety but may create more variation.",
+      "example_scenario": "If the path is too noisy, increase alpha slightly. If APF pulls the drone too close to obstacles, decrease alpha so PSO has more influence."
+    },
+    {
+      "name": "swarm_size",
+      "default": 40,
+      "gui_control": true,
+      "where": "GUI and FPAPFConfig",
+      "controls": "Number of particles used in local PSO search.",
+      "drone_behavior_effect": "More particles test more possible next points.",
+      "trajectory_planning_effect": "Higher swarm_size can improve safety and route quality but increases computation. Lower swarm_size is faster but less careful.",
+      "example_scenario": "Use larger swarm size in dense urban maps. Use smaller swarm size for quick tests in open fields."
+    },
+    {
+      "name": "pso_iterations",
+      "default": 35,
+      "gui_control": true,
+      "where": "GUI and FPAPFConfig",
+      "controls": "Number of PSO update rounds per planning step.",
+      "drone_behavior_effect": "More iterations let particles refine their candidate points more.",
+      "trajectory_planning_effect": "Higher value can improve local decisions but slows planning. Low value may produce rougher points.",
+      "example_scenario": "If the drone is choosing poor points near obstacles, increase pso_iterations."
+    },
+    {
+      "name": "inertia",
+      "default": 0.5,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "How much a particle keeps its old velocity.",
+      "drone_behavior_effect": "Higher inertia makes particles move more freely and explore more.",
+      "trajectory_planning_effect": "High inertia can search wider but may overshoot. Low inertia can converge faster but may get stuck near the first guess.",
+      "example_scenario": "If particles are not exploring enough, increase inertia slightly. If they jump too wildly, reduce it."
+    },
+    {
+      "name": "c1",
+      "default": 1.5,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "How strongly each particle follows its own best memory.",
+      "drone_behavior_effect": "Higher c1 makes particles act more independently.",
+      "trajectory_planning_effect": "High c1 increases exploration. Too high can make the local search unstable.",
+      "example_scenario": "In a map with several possible safe gaps, higher c1 can help particles test different choices."
+    },
+    {
+      "name": "c2",
+      "default": 1.5,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "How strongly each particle follows the swarm global best.",
+      "drone_behavior_effect": "Higher c2 makes particles gather around the current best point.",
+      "trajectory_planning_effect": "High c2 can converge quickly. Too high can cause premature convergence to a weak point.",
+      "example_scenario": "If planning is too slow in easy maps, a slightly higher c2 can make PSO settle faster."
+    },
+    {
+      "name": "init_sigma",
+      "default": 2.0,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Initial spread of particles around x_apf.",
+      "drone_behavior_effect": "Higher init_sigma spreads particles farther from the APF point.",
+      "trajectory_planning_effect": "Large spread may find safer detours. Small spread keeps the path close to APF guidance.",
+      "example_scenario": "If the APF point often lands near blocked regions, increase init_sigma so PSO can search wider."
+    },
+    {
+      "name": "velocity_sigma",
+      "default": 0.5,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Initial random velocity spread for particles.",
+      "drone_behavior_effect": "Higher value makes particles start with stronger random motion.",
+      "trajectory_planning_effect": "High value can improve exploration but can also make local search noisy.",
+      "example_scenario": "For stable repeated paths, keep velocity_sigma moderate."
+    },
+    {
+      "name": "obstacle_penalty_gain",
+      "default": 300.0,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "How expensive unsafe or near-obstacle candidate points are.",
+      "drone_behavior_effect": "Higher gain makes the drone reject unsafe points more strongly.",
+      "trajectory_planning_effect": "High gain improves safety but may increase path length. Low gain can allow close passes.",
+      "example_scenario": "If the drone path passes too close to cylinders, increase obstacle_penalty_gain."
+    },
+    {
+      "name": "collision_margin",
+      "default": 0.5,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Extra clearance required around obstacles.",
+      "drone_behavior_effect": "Higher margin makes the drone keep more space from obstacles.",
+      "trajectory_planning_effect": "High margin makes safer but longer paths. Low margin makes tighter paths.",
+      "example_scenario": "For a large drone or uncertain sensors, use a larger collision_margin."
+    },
+    {
+      "name": "drone_radius",
+      "default": 2.2,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Modeled physical size of the drone.",
+      "drone_behavior_effect": "Larger radius means the planner treats the drone as bigger.",
+      "trajectory_planning_effect": "Larger drone_radius reduces available free space and forces wider paths.",
+      "example_scenario": "A small quadrotor can use a smaller radius. A wide drone should use a larger radius."
+    },
+    {
+      "name": "max_vertical_step",
+      "default": 15.0,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Maximum allowed z change in one path step.",
+      "drone_behavior_effect": "Limits how sharply the drone can climb or descend.",
+      "trajectory_planning_effect": "Low value makes vertical movement smoother but may require more points. High value allows steeper climbs.",
+      "example_scenario": "If the path jumps upward too sharply, reduce max_vertical_step."
+    },
+    {
+      "name": "heading_smoothness_gain",
+      "default": 0.8,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Penalty strength for sharp direction changes.",
+      "drone_behavior_effect": "Higher value discourages sudden turns.",
+      "trajectory_planning_effect": "High value makes smoother trajectories but may avoid sharp necessary maneuvers. Low value allows tighter turns.",
+      "example_scenario": "For a drone that cannot turn quickly, increase heading_smoothness_gain."
+    },
+    {
+      "name": "smoothing_passes",
+      "default": 2,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Number of safe smoothing attempts after planning.",
+      "drone_behavior_effect": "More smoothing can make motion look less jagged.",
+      "trajectory_planning_effect": "Smoothing adds intermediate points and is accepted only if the whole path remains safe.",
+      "example_scenario": "If a planned path is safe but visually rough, smoothing_passes can improve it."
+    },
+    {
+      "name": "segment_samples",
+      "default": 24,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "How many points are checked along each path segment for safety.",
+      "drone_behavior_effect": "Higher value checks collisions more carefully between waypoints.",
+      "trajectory_planning_effect": "High value reduces missed collisions but costs more computation. Low value is faster but less strict.",
+      "example_scenario": "If obstacles are small or paths have long segments, increase segment_samples."
+    },
+    {
+      "name": "repair_attempts",
+      "default": 8,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "How many times the planner tries to repair an unsafe next point.",
+      "drone_behavior_effect": "Higher value gives more chances to find a safe nearby move.",
+      "trajectory_planning_effect": "More repair attempts can avoid early failure but increase planning time.",
+      "example_scenario": "In narrow passage maps, more repair attempts can help the drone keep moving."
+    },
+    {
+      "name": "repair_shrink_factor",
+      "default": 0.72,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "How much the proposed move is shortened during repair.",
+      "drone_behavior_effect": "Smaller value makes repair steps shrink faster.",
+      "trajectory_planning_effect": "Strong shrinking improves safety near obstacles but may slow progress.",
+      "example_scenario": "If the drone keeps proposing unsafe long steps, reduce repair_shrink_factor."
+    },
+    {
+      "name": "vertical_bias",
+      "default": 5.0,
+      "where": "FPAPFConfig in app/simulation/planner.py",
+      "controls": "Extra upward option used during repair variants.",
+      "drone_behavior_effect": "Encourages climbing as one possible escape around obstacles.",
+      "trajectory_planning_effect": "Higher vertical_bias may help pass over obstacles but can increase altitude changes.",
+      "example_scenario": "In maps with tall but passable cylinders, vertical_bias helps the drone try a climb path."
+    }
+  ],
+  "classic_apf_parameters_and_effects": [
+    {
+      "name": "k_att",
+      "default": 1.0,
+      "controls": "Goal attraction strength in classic APF.",
+      "effect": "Higher value pulls more strongly toward the goal."
+    },
+    {
+      "name": "k_rep",
+      "default": 70.0,
+      "controls": "Obstacle repulsion strength in classic APF.",
+      "effect": "Higher value pushes more strongly away from obstacles."
+    },
+    {
+      "name": "rho_d",
+      "default": 12.0,
+      "controls": "Obstacle influence distance in classic APF.",
+      "effect": "Larger value makes obstacles affect the drone earlier."
+    },
+    {
+      "name": "step_size",
+      "default": 2.0,
+      "controls": "Movement step length in classic APF.",
+      "effect": "Larger value moves faster but may be rougher."
+    },
+    {
+      "name": "local_minimum_threshold",
+      "default": 0.00001,
+      "controls": "Force level below which the planner treats itself as stuck.",
+      "effect": "Helps detect local minima."
+    },
+    {
+      "name": "max_vertical_step",
+      "default": 10.0,
+      "controls": "Maximum climb or descent per step.",
+      "effect": "Keeps classic APF movement more feasible."
+    }
+  ],
+  "how_parameters_affect_common_scenarios": [
+    {
+      "scenario": "Open field with few obstacles",
+      "recommended_behavior": "The path should be short and direct.",
+      "useful_parameter_choices": [
+        "Slightly higher k_att can make the path more direct.",
+        "Moderate or lower k_rep is usually enough.",
+        "Smaller swarm_size and pso_iterations can save computation.",
+        "Larger step_scale can reduce number of path points."
+      ]
+    },
+    {
+      "scenario": "Dense urban map with many cylinders",
+      "recommended_behavior": "The path should avoid close passes and should not get stuck.",
+      "useful_parameter_choices": [
+        "Higher k_rep and obstacle_penalty_gain improve safety.",
+        "Higher swarm_size helps search more local choices.",
+        "More pso_iterations can improve the next waypoint.",
+        "Moderate step_scale helps avoid jumping through obstacles."
+      ]
+    },
+    {
+      "scenario": "Narrow passage",
+      "recommended_behavior": "The drone should pass through a tight safe gap without being pushed away from both sides too strongly.",
+      "useful_parameter_choices": [
+        "Do not set k_rep too high, or the passage may feel blocked.",
+        "Do not set gaussian_sigma too high, or both walls may push too much.",
+        "Use enough swarm_size and init_sigma so PSO can find the opening.",
+        "Keep collision_margin realistic."
+      ]
+    },
+    {
+      "scenario": "Tall obstacles that may require climbing",
+      "recommended_behavior": "The drone may need to rise smoothly, pass safely, and descend later.",
+      "useful_parameter_choices": [
+        "max_vertical_step controls how steep the climb can be.",
+        "vertical_bias helps repair logic try upward moves.",
+        "heading_smoothness_gain prevents very sharp climb-turn behavior.",
+        "segment_samples should be high enough to check safety along vertical segments."
+      ]
+    },
+    {
+      "scenario": "Path is too close to obstacles",
+      "possible_fixes": [
+        "Increase k_rep.",
+        "Increase obstacle_penalty_gain.",
+        "Increase collision_margin.",
+        "Increase drone_radius if the real drone is larger.",
+        "Increase segment_samples if collision checking is too coarse."
+      ]
+    },
+    {
+      "scenario": "Path is too long or too wide",
+      "possible_fixes": [
+        "Reduce k_rep slightly.",
+        "Reduce collision_margin if safe to do so.",
+        "Increase alpha so APF direct guidance has more influence.",
+        "Increase k_att slightly."
+      ]
+    },
+    {
+      "scenario": "Path is noisy or zig-zag",
+      "possible_fixes": [
+        "Increase heading_smoothness_gain.",
+        "Increase alpha slightly.",
+        "Reduce init_sigma or velocity_sigma.",
+        "Increase smoothing_passes if the path remains safe."
+      ]
+    },
+    {
+      "scenario": "Planner gets stuck",
+      "possible_fixes": [
+        "Increase max_iterations.",
+        "Increase repair_attempts.",
+        "Increase swarm_size or pso_iterations.",
+        "Adjust alpha lower so PSO has more effect.",
+        "Use a larger init_sigma to search wider."
+      ]
+    }
+  ],
+  "metrics_in_our_implementation": {
+    "point_count": {
+      "meaning": "Number of waypoints in the final path.",
+      "interpretation": "More points can mean a more detailed path. Too many points can mean slow or hesitant planning."
+    },
+    "path_length": {
+      "equation_python_style": "sum(norm(path[i+1] - path[i]) for all path segments)",
+      "meaning": "Total distance traveled by the drone.",
+      "interpretation": "Lower is usually better, but not if it causes unsafe clearance."
+    },
+    "average_clearance": {
+      "equation_python_style": "average(min(clearance from each path point to obstacles))",
+      "meaning": "Average safety distance from obstacles.",
+      "interpretation": "Higher means the path stays safer overall."
+    },
+    "minimum_clearance": {
+      "equation_python_style": "minimum(min(clearance from each path point to obstacles))",
+      "meaning": "Worst safety distance along the path.",
+      "interpretation": "This is very important because one unsafe point can cause a collision."
+    }
+  },
+  "example_walkthrough": {
+    "scenario": "The drone starts at (10, 10, 0), wants to reach (100, 150, 50), and there are tall cylinders between them.",
+    "what_happens": [
+      "At the start, attraction pulls the drone toward the goal.",
+      "When the drone gets near a cylinder, Gaussian repulsion pushes it away from the cylinder surface.",
+      "The total force points in a direction that is partly toward the goal and partly away from the obstacle.",
+      "The APF guidance point is made a short distance in that direction.",
+      "PSO particles are created around that APF point.",
+      "Some particles may be too close to the cylinder and get high fitness cost.",
+      "Some particles may be safer, slightly to the side or above the cylinder.",
+      "The best particle becomes g_best.",
+      "The final next point is a blend of x_apf and g_best.",
+      "Before accepting the next point, the code checks vertical feasibility and segment safety.",
+      "This repeats until the path reaches the goal."
+    ],
+    "main_lesson": "The drone does not plan the full route in one step. It repeatedly chooses the next safe waypoint using APF guidance and PSO improvement."
+  },
+  "limitations_and_honest_notes": [
+    "The PDF text extraction for some equations was noisy, so equations in this document use standard reconstructed forms that match the described method.",
+    "Our reproduction implements the main planner and visualization, but not the full controller comparison with PID, LQR, and ELQR.",
+    "Parameter tuning is still important. There is no single best parameter set for all maps.",
+    "A path can become longer when safety settings are strong. This is not always bad because safe flight may require detours.",
+    "The planner uses random PSO, but the GUI fixes seed=7 for repeatable results."
+  ],
+  "quick_reading_order_for_peers": [
+    "First read big_picture.",
+    "Then read equations_from_the_paper, especially attraction, repulsion, PSO, and fusion.",
+    "Then read how_we_implemented_the_paper.",
+    "Then read fp_apf_parameters_and_effects.",
+    "Finally read how_parameters_affect_common_scenarios."
+  ]
+}
